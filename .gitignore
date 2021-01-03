@@ -1,0 +1,10 @@
+
+build/screen-utility.exp
+
+build/screen-utility.exe
+
+build/screen-utility.lib
+
+main.obj
+
+.vscode/
