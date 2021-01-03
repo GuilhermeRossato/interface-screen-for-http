@@ -1,6 +1,6 @@
 # [INCOMPLETE] Screen Interface via HTTP Program for Windows
 
-A project for building a windows 10 utility tool to serve screen regions (pixels) via the HTTP protocol, in both clear text and binary formats.
+A project for building a windows program to serve screen regions (pixels) via the HTTP protocol, in both clear text and binary formats by exposing a server in a port.
 
 It is designed to answer a request as fast as possible, therefore it will use DirectX9 to request a screen region for the OS so that it can be read easily by other applications.
 
