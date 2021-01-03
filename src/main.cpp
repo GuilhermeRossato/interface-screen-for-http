@@ -7,6 +7,9 @@
 #define __STDC_FORMAT_MACROS
 #include <inttypes.h>
 
+#include "./miniz-2.1.0/miniz.h"
+#include "./miniz-2.1.0/miniz.c"
+
 #define DEFAULT_PORT "8081"
 
 #pragma comment(lib, "ws2_32.lib")
@@ -132,6 +135,8 @@ int main(int argn, char ** argc) {
 	char recv_buffer[3000];
     int64_t count = 0;
 	struct sockaddr_in client_addr;
+	char buffer[1024*1024];
+	int i;
 
 	print_timestamp(1, 1);
     printf("Info: Waiting for connection at port %I64d\n", (int64_t) portnumber);
@@ -176,15 +181,54 @@ listen_goto:
 			);
 		}
 
+		uint8_t image[3*3*3] = {0};
+		memset(image, 127, sizeof(image));
+		size_t image_size = 0;
+		uint8_t * binary_image = (uint8_t *) tdefl_write_image_to_png_file_in_memory_ex(image, 3, 3, 3, &image_size, MZ_NO_COMPRESSION, 0);
+		if (binary_image == NULL) {
+			printf("Error: miniz png creation failed\n");
+    		WSACleanup();
+			return 1;
+		}
+		print_timestamp(1, 1);
+		printf("Info: Server created image of %zd bytes\n", image_size);
+
+		int buffer_size = snprintf(
+			buffer,
+			sizeof(buffer) - 1,
+			"HTTP/1.1 200 OK\r\n"
+			"Content-Type: image/png; charset=UTF-8\r\n"
+			"Content-Length: %zd\r\n"
+			"Connection: close\r\n"
+			"\r\n",
+			image_size
+		);
+
+		if (buffer_size + image_size >= sizeof(buffer)) {
+			printf("Error: We run out of space to write the output image into the reply buffer\n");
+    		WSACleanup();
+			return 1;
+		}
+
+		if (buffer[buffer_size] != '\0') {
+			printf("Error: My assumption of the buffer structure is incorrect\n");
+			WSACleanup();
+			return 1;
+		}
+
+		for (i = buffer_size; i < buffer_size + image_size && i < sizeof(buffer); i++) {
+			buffer[i] = binary_image[i - buffer_size];
+		}
+		if (i < sizeof(buffer)) {
+			buffer[i] = '\0';
+		}
+
+		mz_free(binary_image);
+
 		send(
 			msg_sock,
-			"HTTP/1.1 200 OK\r\n"
-			"Content-Type: text/html; charset=UTF-8\r\n"
-			"Content-Length: 15\r\n"
-			"Connection: close\r\n"
-			"\r\n\r\n"
-			"Hello World\r\n",
-			114+1,
+			buffer,
+			buffer_size + image_size + 1,
 			0
 		);
 
