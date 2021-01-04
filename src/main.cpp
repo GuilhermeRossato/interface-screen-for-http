@@ -133,12 +133,12 @@ int interpret_http_query(
 
 	int i = 0;
 
-	if (does_first_start_with_second(&query[i], "/region/")) {
-		i += 8;
-		*is_region_request = 1;
-	} else if (does_first_start_with_second(&query[i], "/pixel/")) {
+	if (does_first_start_with_second(&query[i], "/pixel/")) {
 		i += 7;
 		*is_region_request = 0;
+	} else if (query[i] == '/' && (query[i+1] == ' ' || query[i+1] == '?' || query[i+1] == '#')) {
+		i += 1;
+		*is_region_request = 1;
 	} else {
 		return -2; // Unknown route
 	}
@@ -418,8 +418,6 @@ int main(int argn, char ** argc) {
 			&is_region_request
 		);
 
-		printf("is_region_request %d\n", is_region_request);
-
 		if (interpretation_code != 1) {
 			print_timestamp(1, 1);
 			printf("Info: Query interpretation failed with error %d\n", interpretation_code);
@@ -429,12 +427,12 @@ int main(int argn, char ** argc) {
 					OUTPUT_BUFFER_SIZE,
 					"HTTP/1.1 404 Not Found\r\n"
 					"Content-Type: text/html; charset=UTF-8\r\n"
-					"Content-Length: 137\r\n"
+					"Content-Length: 125\r\n"
 					"Connection: close\r\n"
 					"\r\n"
 					"Unknown url path<br/>\r\n"
-					"<a href='/pixel/'>use /pixel/</a> for pixel requests</br>\r\n"
-					"<a href='/region/'>use /region/</a> for region requests\r\n\r\n"
+					"<a href='/'>use /</a> for region requests</br>\r\n"
+					"<a href='/pixel/'>use /pixel/</a> for pixel requests\r\n\r\n"
 				);
 			} else {
 				buffer_size = snprintf(
@@ -449,7 +447,6 @@ int main(int argn, char ** argc) {
 					interpretation_code
 				);
 			}
-			printf("Sending: \n\"%s\"\nwith %zd length and %d buffer sizze", buffer, strlen(buffer), buffer_size);
 			send(
 				msg_sock,
 				buffer,
@@ -466,7 +463,7 @@ int main(int argn, char ** argc) {
 		if (left < 0 || left > 10000) {
 			left = 0;
 		}
-		if (!is_region_request) {
+		if (!is_region_request || is_json_format) {
 			width = 1;
 			height = 1;
 		} else {
