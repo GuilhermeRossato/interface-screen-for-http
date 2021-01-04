@@ -124,6 +124,10 @@ int interpret_http_query(
 		// printf("str is \"%s\"\n", &query[0]);
 		return -7; // string must start at a backslash
 	} else if (query[1] == ' ') {
+		*is_region_request = 1;
+		*is_png_format = 1;
+		*is_binary_format = 0;
+		*is_json_format = 0;
 		return 1; // Success as request is with default parameters
 	}
 
@@ -140,6 +144,9 @@ int interpret_http_query(
 	}
 
 	if (query[i] == ' ') {
+		*is_png_format = 1;
+		*is_binary_format = 0;
+		*is_json_format = 0;
 		return 1; // Success as request is with default parameters
 	}
 
@@ -411,6 +418,8 @@ int main(int argn, char ** argc) {
 			&is_region_request
 		);
 
+		printf("is_region_request %d\n", is_region_request);
+
 		if (interpretation_code != 1) {
 			print_timestamp(1, 1);
 			printf("Info: Query interpretation failed with error %d\n", interpretation_code);
@@ -529,28 +538,35 @@ int main(int argn, char ** argc) {
 				image_size
 			);
 
-			if (buffer_size + image_size >= (OUTPUT_BUFFER_SIZE)) {
-				printf("Error: We run out of space to write the output image into the reply buffer\n");
-				WSACleanup();
-				return 1;
-			}
+			if (buffer_size + image_size < OUTPUT_BUFFER_SIZE) {
+				if (buffer[buffer_size] != '\0') {
+					printf("Error: My assumption of the buffer structure is incorrect\n");
+					WSACleanup();
+					return 1;
+				}
 
-			if (buffer[buffer_size] != '\0') {
-				printf("Error: My assumption of the buffer structure is incorrect\n");
-				WSACleanup();
-				return 1;
-			}
+				for (i = buffer_size; i < buffer_size + image_size && i < (OUTPUT_BUFFER_SIZE); i++) {
+					buffer[i] = png_image[i - buffer_size];
+				}
+				if (i < (OUTPUT_BUFFER_SIZE)) {
+					buffer[i] = '\0';
+				}
 
-			for (i = buffer_size; i < buffer_size + image_size && i < (OUTPUT_BUFFER_SIZE); i++) {
-				buffer[i] = png_image[i - buffer_size];
-			}
-			if (i < (OUTPUT_BUFFER_SIZE)) {
-				buffer[i] = '\0';
-			}
+				mz_free(png_image);
 
-			mz_free(png_image);
-
-			buffer_size = buffer_size + image_size + 1;
+				buffer_size = buffer_size + image_size + 1;
+			} else {
+				buffer_size = snprintf(
+					buffer,
+					OUTPUT_BUFFER_SIZE,
+					"HTTP/1.1 200 OK\r\n"
+					"Content-Type: text/html; charset=UTF-8\r\n"
+					"Content-Length: 41\r\n"
+					"Connection: close\r\n"
+					"\r\n"
+					"Buffer to write image output is too small\r\n"
+				);
+			}
 		} else if (is_binary_format) {
 			//printf("BINARY FORMAT\n");
 			buffer_size = snprintf(
@@ -563,8 +579,21 @@ int main(int argn, char ** argc) {
 				"\r\n",
 				(int64_t) width * height * 3
 			);
-			memcpy_s(&buffer[buffer_size], OUTPUT_BUFFER_SIZE - 1 - buffer_size, image, width * height * 3);
-			buffer_size += width * height * 3;
+			if (buffer_size + width * height * 3 >= OUTPUT_BUFFER_SIZE) {
+				buffer_size = snprintf(
+					buffer,
+					OUTPUT_BUFFER_SIZE,
+					"HTTP/1.1 200 OK\r\n"
+					"Content-Type: text/html; charset=UTF-8\r\n"
+					"Content-Length: 41\r\n"
+					"Connection: close\r\n"
+					"\r\n"
+					"Buffer to write image output is too small\r\n"
+				);
+			} else {
+				memcpy_s(&buffer[buffer_size], OUTPUT_BUFFER_SIZE - 1 - buffer_size, image, width * height * 3);
+				buffer_size += width * height * 3;
+			}
 		} else if (is_json_format) {
 			//printf("JSON FORMAT\n");
 			buffer_size = snprintf(buffer, OUTPUT_BUFFER_SIZE, "{\"r\": %d, \"g\": %d, \"b\": %d, \"x\": %d, \"y\": %d}", image[0], image[1], image[2], left, top);
