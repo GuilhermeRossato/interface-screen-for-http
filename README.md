@@ -113,4 +113,8 @@ This tool will be implemented in terms of features, one by one:
 2. Must allow for parameters to change the size and position of the region being requested `[Done]`
 3. Must allow individual pixel requests in both binary and text format `[Done]`
 4. Must allow a JSON format for one pixel `[Done]`
-5. Utility function to reply screen size `[In progress]`
+5. Utility function to reply screen size `[Done]`
+
+# Disclaimer
+
+The project is finished, I do not make any warranty about the working state of the software included in this repository. I also shall not be responsible for any harm the use of the software might cause.

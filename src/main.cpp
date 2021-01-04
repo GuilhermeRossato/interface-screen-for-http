@@ -325,8 +325,8 @@ int main(int argn, char ** argc) {
 		WSACleanup();
 		return 1;
 	}
-	uint64_t screen_width = globalLastCaptureWidth;
-	uint64_t screen_height = globalLastCaptureHeight;
+	int64_t screen_width = globalLastCaptureWidth;
+	int64_t screen_height = globalLastCaptureHeight;
 	uint8_t * png_image;
 
 	print_timestamp(1, 1);
@@ -385,7 +385,7 @@ int main(int argn, char ** argc) {
 				"Connection: close\r\n"
 				"\r\n"
 				"%s",
-				snprintf(content_buffer, 64, "%d,%d", screen_width, screen_height),
+				snprintf(content_buffer, 64, "%I64d,%I64d", screen_width, screen_height),
 				content_buffer
 			);
 			send(
