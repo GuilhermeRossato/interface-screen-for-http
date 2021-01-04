@@ -21,8 +21,11 @@ BYTE * pixel_buffer = NULL;
 uint8_t * capture_screen_buffer = NULL;
 int64_t capture_screen_buffer_size = 0;
 
+LONG globalLastCaptureWidth;
+LONG globalLastCaptureHeight;
+
 uint8_t * CaptureScreenBuffer(int x, int y, int w, int h) {
-	if (x < 0 || y < 0 || w <= 0 || h <= 0) {
+	if ((x < 0 || y < 0 || w <= 0 || h <= 0) && !(x == 0 && y == 0 && w == 0 && h == 0)) {
 		return NULL;
 	}
 	LONG left = x;
@@ -31,11 +34,16 @@ uint8_t * CaptureScreenBuffer(int x, int y, int w, int h) {
 	LONG height = h;
 	uint32_t stride;
 	RECT rc = { left, top, left + width, top + height };
-	Direct3D9TakeScreenshot((uint32_t) D3DADAPTER_DEFAULT, &pixel_buffer, &stride, &rc);
+	if (x == 0 && y == 0 && w == 0 && h == 0) {
+		Direct3D9TakeScreenshot((uint32_t) D3DADAPTER_DEFAULT, &pixel_buffer, &stride, NULL);
+	} else {
+		Direct3D9TakeScreenshot((uint32_t) D3DADAPTER_DEFAULT, &pixel_buffer, &stride, &rc);
+	}
 
-	int64_t needed_buffer_size = w * h * 3;
 
-	if (capture_screen_buffer_size < needed_buffer_size || capture_screen_buffer == NULL) {
+	int64_t needed_buffer_size = globalLastCaptureWidth * globalLastCaptureHeight * 3;
+
+	if (capture_screen_buffer_size >= needed_buffer_size || capture_screen_buffer == NULL) {
 		if (capture_screen_buffer != NULL) {
 			free(capture_screen_buffer);
 		}
@@ -76,14 +84,14 @@ HRESULT Direct3D9TakeScreenshot(uint32_t adapter, LPBYTE *pBuffer, uint32_t *pSt
 		HRCHECK(d3d->GetAdapterDisplayMode(adapter, &mode));
 	}
 
-	LONG width = pInputRc ? (pInputRc->right - pInputRc->left) : mode.Width;
-	LONG height = pInputRc ? (pInputRc->bottom - pInputRc->top) : mode.Height;
+	globalLastCaptureWidth = pInputRc ? (pInputRc->right - pInputRc->left) : mode.Width;
+	globalLastCaptureHeight = pInputRc ? (pInputRc->bottom - pInputRc->top) : mode.Height;
 
-	if (times_called == 0) {
+	if (times_called == 0 || parameters.BackBufferHeight != globalLastCaptureHeight || parameters.BackBufferHeight != globalLastCaptureWidth) {
 		parameters.Windowed = TRUE;
 		parameters.BackBufferCount = 1;
-		parameters.BackBufferHeight = height;
-		parameters.BackBufferWidth = width;
+		parameters.BackBufferHeight = globalLastCaptureHeight;
+		parameters.BackBufferWidth = globalLastCaptureWidth;
 		parameters.SwapEffect = D3DSWAPEFFECT_DISCARD;
 		parameters.hDeviceWindow = NULL;
 	}
@@ -101,7 +109,7 @@ HRESULT Direct3D9TakeScreenshot(uint32_t adapter, LPBYTE *pBuffer, uint32_t *pSt
 
 	if (!*pBuffer) {
 		// allocate buffer
-		*pBuffer = (LPBYTE)LocalAlloc(0, *pStride * height);
+		*pBuffer = (LPBYTE)LocalAlloc(0, *pStride * globalLastCaptureHeight);
 	}
 	if (!*pBuffer) {
 		hr = E_OUTOFMEMORY;
@@ -113,7 +121,7 @@ HRESULT Direct3D9TakeScreenshot(uint32_t adapter, LPBYTE *pBuffer, uint32_t *pSt
 
 	// copy it into our buffer
 	HRCHECK(surface->LockRect(&rc, pInputRc, 0));
-	CopyMemory(*pBuffer, rc.pBits, rc.Pitch * height);
+	CopyMemory(*pBuffer, rc.pBits, rc.Pitch * globalLastCaptureHeight);
 	HRCHECK(surface->UnlockRect());
 
 	cleanup:

@@ -11,6 +11,7 @@
 #include "./capture.cpp"
 
 #define DEFAULT_PORT "8081"
+#define OUTPUT_BUFFER_SIZE 10314290
 
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "gdi32.lib")
@@ -78,6 +79,167 @@ int convert_string_to_long(char * string, long * number, int * veredict) {
 	return 1;
 }
 
+int are_same_string(const char * a, const char * b) {
+	int i;
+	for (i = 0; a[i] != '\0' && b[i] != '\0'; i++) {
+		if (a[i] != b[i]) {
+			return 0;
+		}
+	}
+	if (a[i] == '\0' && b[i] == '\0') {
+		return 1;
+	}
+	return 0;
+}
+
+int does_first_start_with_second(const char * a, const char * b) {
+	int i;
+	for (i = 0; a[i] != '\0' && b[i] != '\0'; i++) {
+		if (a[i] != b[i]) {
+			return 0;
+		}
+	}
+	if (a[i] != '\0' && b[i] != '\0') {
+		return 0;
+	}
+	if (b[i] == '\0') {
+		return 1;
+	}
+	return 0;
+}
+
+int interpret_http_query(
+	char * query,
+	int64_t buffer_length,
+	int * left, int * top,
+	int * width, int * height,
+	int * is_png_format,
+	int * is_binary_format,
+	int * is_json_format,
+	int * is_region_request
+) {
+	if (query == NULL || buffer_length <= 0) {
+		return -1;
+	} else if (query[0] != '/') {
+		// printf("str is \"%s\"\n", &query[0]);
+		return -7; // string must start at a backslash
+	} else if (query[1] == ' ') {
+		return 1; // Success as request is with default parameters
+	}
+
+	int i = 0;
+
+	if (does_first_start_with_second(&query[i], "/region/")) {
+		i += 8;
+		*is_region_request = 1;
+	} else if (does_first_start_with_second(&query[i], "/pixel/")) {
+		i += 7;
+		*is_region_request = 0;
+	} else {
+		return -2; // Unknown route
+	}
+
+	if (query[i] == ' ') {
+		return 1; // Success as request is with default parameters
+	}
+
+	if (query[i] != '?') {
+		// printf("query at 0 is %c%c, at %d is %c%c%c\n", query[0], query[1], i, query[i], query[i+1], query[i+2]);
+		return -3; // Something other than ? and # must be invalid query
+	}
+
+	i++;
+
+	long value;
+	int veredict;
+
+	for (; query[i] != ' ' && query[i] != '\0' && query[i] != '\r' && query[i] != '\n'; i++) {
+		if (query[i] == '&') {
+			continue; // next parameter
+		}
+
+		int parameter_code =
+			does_first_start_with_second(&query[i], "width=") ? 1 :
+			does_first_start_with_second(&query[i], "height=") ? 2 :
+			does_first_start_with_second(&query[i], "left=") ? 3 :
+			does_first_start_with_second(&query[i], "x=") ? 4 :
+			does_first_start_with_second(&query[i], "top=") ? 5 :
+			does_first_start_with_second(&query[i], "y=") ? 6 :
+			does_first_start_with_second(&query[i], "format=") ? 7 : 0;
+
+		// check for unknown parameter
+		if (parameter_code == 0) {
+			// skip to next parameter or end
+			for (i; query[i] != ' ' && query[i] != '&' && query[i] != '\r' && query[i] != '\n'; i++);
+			i--;
+			continue;
+		}
+
+		// printf("parameter code is %d\n", parameter_code);
+		// skip to after equal sign
+		while (query[i] != '=' && query[i] != ' ' && query[i] != '\0') {
+			i++;
+		}
+		if (query[i] != '=') {
+			return -8; // unexpected parameter with no content
+		}
+		i++;
+		// printf("Parameter value is \"%s\"\n", &query[i]);
+
+		if (parameter_code == 7) {
+			if (query[i] == 't' || query[i] == 'T') {
+				*is_png_format = 0;
+				*is_binary_format = 0;
+				*is_json_format = 0;
+			} else if (((query[i] == 'p' || query[i] == 'P') && (query[i+1] == 'n' || query[i+1] == 'N')) || ((query[i] == 'i' || query[i] == 'I') && (query[i+1] == 'm' || query[i+1] == 'M'))) {
+				*is_png_format = 1;
+				*is_binary_format = 0;
+				*is_json_format = 0;
+			} else if ((query[i] == 'b' || query[i] == 'B') && (query[i+1] == 'i' || query[i+1] == 'I')) {
+				*is_png_format = 0;
+				*is_binary_format = 1;
+				*is_json_format = 0;
+			} else if ((query[i] == 'j' || query[i] == 'J') && (query[i+1] == 's' || query[i+1] == 'S')) {
+				*is_png_format = 0;
+				*is_binary_format = 0;
+				*is_json_format = 1;
+			} else {
+				return -4; // invalid 'format' parameter
+			}
+			// skip to next parameter or end of line
+			for (i; query[i] != ' ' && query[i] != '&' && query[i] != '\r' && query[i] != '\n'; i++);
+			i--;
+			continue;
+		}
+
+		// printf("About to interpret \"%s\"\n", &query[i]);
+
+		convert_string_to_long(&query[i], &value, &veredict);
+
+		if (!veredict) {
+			return -5; // expected numeric parameter, got non-number
+		} else if (value < 0 || value > 10000) {
+			return -6; // parameter outside acceptable range
+		}
+
+		switch (parameter_code) {
+			case 1: *width = value; break;
+			case 2: *height = value; break;
+			case 3:
+			case 4: *left = value; break;
+			case 5:
+			case 6: *top = value; break;
+		}
+
+		// skip to next parameter or end
+		for (i; query[i] != ' ' && query[i] != '&' && query[i] != '\r' && query[i] != '\n'; i++);
+		i--;
+		continue;
+	}
+
+	return 1;
+}
+
 int main(int argn, char ** argc) {
 	char * portnumber_str = argn >= 2 ? argc[2] : DEFAULT_PORT;
 
@@ -135,13 +297,29 @@ int main(int argn, char ** argc) {
 		return 1;
 	}
 
+	char * buffer = (char *) malloc(OUTPUT_BUFFER_SIZE);
+	if (!buffer) {
+		printf("Error: Could not allocate buffer for output of size %d\n", OUTPUT_BUFFER_SIZE);
+		return 1;
+	}
+
 	char recv_buffer[3000];
     int64_t count = 0;
 	struct sockaddr_in client_addr;
-	char buffer[1024*64];
 	int i, buffer_size;
 
-	uint8_t * image;
+	uint8_t * image = CaptureScreenBuffer(0, 0, 0, 0);
+	if (!image) {
+		printf("Error: Could not generate test image\n");
+		WSACleanup();
+		return 1;
+	} else if (globalLastCaptureWidth <= 0 || globalLastCaptureHeight <= 0 || globalLastCaptureWidth >= 10000 || globalLastCaptureHeight >= 10000) {
+		printf("Error: Unexpected screen size: %I64d, %I64d\n", (int64_t) globalLastCaptureWidth, (int64_t) globalLastCaptureHeight);
+		WSACleanup();
+		return 1;
+	}
+	uint64_t screen_width = globalLastCaptureWidth;
+	uint64_t screen_height = globalLastCaptureHeight;
 	uint8_t * png_image;
 
 	print_timestamp(1, 1);
@@ -169,7 +347,7 @@ int main(int argn, char ** argc) {
 		print_timestamp(1, 1);
 		printf("Info: Connection %I64d received %I64d bytes from \"%s\" at port %d\n", ++count, (int64_t) recv_length, inet_ntoa(client_addr.sin_addr), htons(client_addr.sin_port));
 
-		if (recv_length < 4 || recv_buffer[0] != 'G' || recv_buffer[1] != 'E' || recv_buffer[2] != 'T' || recv_buffer[3] != ' ') {
+		if (recv_length < 4 || recv_buffer[0] != 'G' || recv_buffer[1] != 'E' || recv_buffer[2] != 'T' || recv_buffer[3] != ' ' || recv_buffer[4] != '/') {
 			print_timestamp(1, 1);
 			printf("Info: Server sent unexpected request method\n");
 			send(
@@ -178,65 +356,263 @@ int main(int argn, char ** argc) {
 				"Content-Type: text/html; charset=UTF-8\r\n"
 				"Content-Length: 33\r\n"
 				"Connection: close\r\n"
-				"\r\n\r\n"
+				"\r\n"
 				"Only GET requests are allowed\r\n",
 				148+1,
 				0
 			);
+			closesocket(msg_sock);
+			continue;
 		}
 
-		image = CaptureScreenBuffer(0, 0, 100, 100);
-		if (image == NULL) {
-			printf("Error: Capture screen buffer failed\n");
-    		WSACleanup();
-			return 1;
-		}
-		size_t image_size = 0;
-		png_image = (uint8_t *) tdefl_write_image_to_png_file_in_memory_ex(image, 100, 100, 3, &image_size, MZ_NO_COMPRESSION, 0);
-		if (png_image == NULL) {
-			printf("Error: miniz png creation failed\n");
-    		WSACleanup();
-			return 1;
-		}
-		print_timestamp(1, 1);
-		printf("Info: Server created image of %zd bytes\n", image_size);
+		int left = 0;
+		int top = 0;
+		int width = screen_width;
+		int height = screen_height;
+		int is_png_format = 1;
+		int is_binary_format = 0;
+		int is_json_format = 0;
+		int is_region_request = 0;
 
-		buffer_size = snprintf(
-			buffer,
-			sizeof(buffer) - 1,
-			"HTTP/1.1 200 OK\r\n"
-			"Content-Type: image/png; charset=UTF-8\r\n"
-			"Content-Length: %zd\r\n"
-			"Connection: close\r\n"
-			"\r\n",
-			image_size
+		int interpretation_code = interpret_http_query(
+			&recv_buffer[4],
+			recv_length - 4,
+			&left, &top,
+			&width, &height,
+			&is_png_format,
+			&is_binary_format,
+			&is_json_format,
+			&is_region_request
 		);
 
-		if (buffer_size + image_size >= sizeof(buffer)) {
-			printf("Error: We run out of space to write the output image into the reply buffer\n");
-    		WSACleanup();
-			return 1;
+		if (interpretation_code != 1) {
+			print_timestamp(1, 1);
+			printf("Info: Query interpretation failed with error %d\n", interpretation_code);
+			if (interpretation_code == -2) {
+				buffer_size = snprintf(
+					buffer,
+					OUTPUT_BUFFER_SIZE,
+					"HTTP/1.1 404 Not Found\r\n"
+					"Content-Type: text/html; charset=UTF-8\r\n"
+					"Content-Length: 137\r\n"
+					"Connection: close\r\n"
+					"\r\n"
+					"Unknown url path<br/>\r\n"
+					"<a href='/pixel/'>use /pixel/</a> for pixel requests</br>\r\n"
+					"<a href='/region/'>use /region/</a> for region requests\r\n\r\n"
+				);
+			} else {
+				buffer_size = snprintf(
+					buffer,
+					OUTPUT_BUFFER_SIZE,
+					"HTTP/1.1 403 Forbidden\r\n"
+					"Content-Type: text/html; charset=UTF-8\r\n"
+					"Content-Length: 75\r\n"
+					"Connection: close\r\n"
+					"\r\n"
+					"Invalid or unexpected query parameter. Query interpretation returned %2d\r\n\r\n",
+					interpretation_code
+				);
+			}
+			printf("Sending: \n\"%s\"\nwith %zd length and %d buffer sizze", buffer, strlen(buffer), buffer_size);
+			send(
+				msg_sock,
+				buffer,
+				buffer_size,
+				0
+			);
+			closesocket(msg_sock);
+			continue;
 		}
 
-		if (buffer[buffer_size] != '\0') {
-			printf("Error: My assumption of the buffer structure is incorrect\n");
-			WSACleanup();
-			return 1;
+		if (top < 0 || top > 10000) {
+			top = 0;
+		}
+		if (left < 0 || left > 10000) {
+			left = 0;
+		}
+		if (!is_region_request) {
+			width = 1;
+			height = 1;
+		} else {
+			if (width == 0) {
+				width = screen_width;
+			}
+			if (height == 0) {
+				height = screen_height;
+			}
+			if (left + width >= screen_width) {
+				width = screen_width - left - 1;
+			}
+			if (top + height >= screen_height) {
+				height = screen_height - top - 1;
+			}
 		}
 
-		for (i = buffer_size; i < buffer_size + image_size && i < sizeof(buffer); i++) {
-			buffer[i] = png_image[i - buffer_size];
-		}
-		if (i < sizeof(buffer)) {
-			buffer[i] = '\0';
-		}
+		image = CaptureScreenBuffer(left, top, width, height);
 
-		mz_free(png_image);
+		if (image == NULL) {
+			print_timestamp(1, 1);
+			printf("Info: Screen capture failed for parameters %d %d %d %d\n", left, top, width, height);
+
+			buffer_size = snprintf(
+				buffer,
+				OUTPUT_BUFFER_SIZE,
+				"HTTP/1.1 403 Forbidden\r\n"
+				"Content-Type: text/html; charset=UTF-8\r\n"
+				"Content-Length: 25\r\n"
+				"Connection: close\r\n"
+				"\r\n"
+				"Screen capture failed\r\n\r\n"
+			);
+		} else if (globalLastCaptureHeight <= 0 || globalLastCaptureHeight <= 0 || globalLastCaptureHeight >= 10000 || globalLastCaptureHeight >= 10000) {
+			print_timestamp(1, 1);
+			printf("Info: Last capture size was out of bounds: %I64d and %I64d\n", (int64_t) globalLastCaptureWidth, (int64_t) globalLastCaptureHeight);
+
+			buffer_size = snprintf(
+				buffer,
+				OUTPUT_BUFFER_SIZE,
+				"HTTP/1.1 403 Forbidden\r\n"
+				"Content-Type: text/html; charset=UTF-8\r\n"
+				"Content-Length: 44\r\n"
+				"Connection: close\r\n"
+				"\r\n"
+				"Invalid or unexpected query capture size\r\n\r\n"
+			);
+		} else if (is_png_format) {
+			//printf("PNG FORMAT\n");
+			size_t image_size = 0;
+			png_image = (uint8_t *) tdefl_write_image_to_png_file_in_memory_ex(image, globalLastCaptureWidth, globalLastCaptureHeight, 3, &image_size, MZ_NO_COMPRESSION, 0);
+			if (png_image == NULL) {
+				print_timestamp(1, 1);
+				printf("Error: Miniz png creation failed\n");
+				WSACleanup();
+				return 1;
+			}
+			print_timestamp(1, 1);
+			printf("Info: Server created image of %zd bytes\n", image_size);
+
+			buffer_size = snprintf(
+				buffer,
+				OUTPUT_BUFFER_SIZE,
+				"HTTP/1.1 200 OK\r\n"
+				"Content-Type: image/png; charset=UTF-8\r\n"
+				"Content-Length: %zd\r\n"
+				"Connection: close\r\n"
+				"\r\n",
+				image_size
+			);
+
+			if (buffer_size + image_size >= (OUTPUT_BUFFER_SIZE)) {
+				printf("Error: We run out of space to write the output image into the reply buffer\n");
+				WSACleanup();
+				return 1;
+			}
+
+			if (buffer[buffer_size] != '\0') {
+				printf("Error: My assumption of the buffer structure is incorrect\n");
+				WSACleanup();
+				return 1;
+			}
+
+			for (i = buffer_size; i < buffer_size + image_size && i < (OUTPUT_BUFFER_SIZE); i++) {
+				buffer[i] = png_image[i - buffer_size];
+			}
+			if (i < (OUTPUT_BUFFER_SIZE)) {
+				buffer[i] = '\0';
+			}
+
+			mz_free(png_image);
+
+			buffer_size = buffer_size + image_size + 1;
+		} else if (is_binary_format) {
+			//printf("BINARY FORMAT\n");
+			buffer_size = snprintf(
+				buffer,
+				OUTPUT_BUFFER_SIZE,
+				"HTTP/1.1 200 OK\r\n"
+				"Content-Type: application/octet-stream; charset=UTF-8\r\n"
+				"Content-Length: %I64d\r\n"
+				"Connection: close\r\n"
+				"\r\n",
+				(int64_t) width * height * 3
+			);
+			memcpy_s(&buffer[buffer_size], OUTPUT_BUFFER_SIZE - 1 - buffer_size, image, width * height * 3);
+			buffer_size += width * height * 3;
+		} else if (is_json_format) {
+			//printf("JSON FORMAT\n");
+			buffer_size = snprintf(buffer, OUTPUT_BUFFER_SIZE, "{\"r\": %d, \"g\": %d, \"b\": %d, \"x\": %d, \"y\": %d}", image[0], image[1], image[2], left, top);
+			buffer_size = snprintf(
+				buffer,
+				OUTPUT_BUFFER_SIZE,
+				"HTTP/1.1 200 OK\r\n"
+				"Content-Type: application/json; charset=UTF-8\r\n"
+				"Content-Length: %d\r\n"
+				"Connection: close\r\n"
+				"\r\n"
+				"{\"r\": %d, \"g\": %d, \"b\": %d, \"x\": %d, \"y\": %d}",
+				buffer_size,
+				image[0], image[1], image[2], left, top
+			);
+		} else {
+			//printf("TEXT FORMAT\n");
+			// Reply with bytes separated by commas and pixels by lines
+			int byte_counter = 0;
+			for (i = 0; i < width * height * 3; i++) {
+				if (image[i] < 10) {
+					byte_counter += 1;
+				} else if (image[i] < 100) {
+					byte_counter += 2;
+				} else {
+					byte_counter += 3;
+				}
+				if (i + 1 != width * height * 3) {
+					byte_counter += 1;
+				}
+			}
+			buffer_size = snprintf(
+				buffer,
+				OUTPUT_BUFFER_SIZE,
+				"HTTP/1.1 200 OK\r\n"
+				"Content-Type: text/html; charset=UTF-8\r\n"
+				"Content-Length: %d\r\n"
+				"Connection: close\r\n"
+				"\r\n",
+				byte_counter
+			);
+			if (buffer[buffer_size] != '\0') {
+				print_timestamp(1, 1);
+				printf("Error: Unexpected snprintf output\n");
+				WSACleanup();
+				return 1;
+			}
+			for (i = 0; i < width * height * 3; i++) {
+				if (buffer_size + 3 >= OUTPUT_BUFFER_SIZE) {
+					break;
+				} else if (image[i] < 10) {
+					buffer[buffer_size++] = '0' + image[i];
+				} else if (image[i] < 100) {
+					buffer[buffer_size++] = '0' + ((image[i] / 10) % 10);
+					buffer[buffer_size++] = '0' + ((image[i] % 10) % 10);
+				} else {
+					buffer[buffer_size++] = '0' + ((image[i] / 100) % 10);
+					buffer[buffer_size++] = '0' + ((image[i] / 10) % 10);
+					buffer[buffer_size++] = '0' + (image[i] % 10);
+				}
+
+				if (i + 1 != width * height * 3) {
+					buffer[buffer_size++] = i % 3 == 2 ? '\n' : ',';
+				}
+			}
+			buffer[buffer_size++] = '\r';
+			buffer[buffer_size++] = '\n';
+			buffer[buffer_size++] = '\0';
+		}
 
 		send(
 			msg_sock,
 			buffer,
-			buffer_size + image_size + 1,
+			buffer_size,
 			0
 		);
 
