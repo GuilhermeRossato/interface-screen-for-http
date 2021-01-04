@@ -365,6 +365,32 @@ int main(int argn, char ** argc) {
 			continue;
 		}
 
+		if (does_first_start_with_second(&recv_buffer[4], "/size/")) {
+			print_timestamp(1, 1);
+			printf("Info: Client requested utility method '/size/'\n");
+			char content_buffer[64];
+			buffer_size = snprintf(
+				buffer,
+				OUTPUT_BUFFER_SIZE,
+				"HTTP/1.1 400 OK\r\n"
+				"Content-Type: text/html; charset=UTF-8\r\n"
+				"Content-Length: %d\r\n"
+				"Connection: close\r\n"
+				"\r\n"
+				"%s",
+				snprintf(content_buffer, 64, "%d,%d", screen_width, screen_height),
+				content_buffer
+			);
+			send(
+				msg_sock,
+				buffer,
+				buffer_size,
+				0
+			);
+			closesocket(msg_sock);
+			continue;
+		}
+
 		int left = 0;
 		int top = 0;
 		int width = screen_width;

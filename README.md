@@ -47,7 +47,13 @@ http://localhost:8081/region/?width=10&height=1&format=bin
 
 Requests to this endpoint will return the width and the height of the screen separated by a comma:
 
-ht
+http://localhost:8081/size/
+
+Should give you something like:
+
+```
+2560,1080
+```
 
 ## How to use
 
