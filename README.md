@@ -53,7 +53,7 @@ The idea is that this program knows how to fetch screen pixels, it is specialize
 
 This tool will be implemented in terms of features, one by one:
 
-1. It must reply a full image file by default containing the pixels of the screen at the current time.
-2. It must allow for parameters to change the size and position of the region being requested
-3. It must allow individual pixel requests in both binary and text format
+1. It must reply a full image file by default containing the pixels of the screen at the current time. `[Done]`
+2. It must allow for parameters to change the size and position of the region being requested `[In progress]`
+3. It must allow individual pixel requests in both binary and text format `[Not started]`
 

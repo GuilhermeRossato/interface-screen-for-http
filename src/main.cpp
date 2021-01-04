@@ -8,11 +8,14 @@
 #include <inttypes.h>
 
 #include "./miniz-2.1.0/miniz.h"
-#include "./miniz-2.1.0/miniz.c"
+#include "./capture.cpp"
 
 #define DEFAULT_PORT "8081"
 
 #pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "gdi32.lib")
+#pragma comment(lib, "user32.lib")
+#pragma comment(lib, "d3d9.lib")
 
 void print_timestamp(int with_brackets, int is_local_time) {
 	if (with_brackets) {
@@ -135,21 +138,22 @@ int main(int argn, char ** argc) {
 	char recv_buffer[3000];
     int64_t count = 0;
 	struct sockaddr_in client_addr;
-	char buffer[1024*1024];
-	int i;
+	char buffer[1024*64];
+	int i, buffer_size;
+
+	uint8_t * image;
+	uint8_t * png_image;
 
 	print_timestamp(1, 1);
     printf("Info: Waiting for connection at port %I64d\n", (int64_t) portnumber);
 
-listen_goto:
-
-    if (listen(sock, 10) == SOCKET_ERROR) {
-		printf("Error: Listen function failed\n");
-		WSACleanup();
-        return 1;
-	}
-
     while (1) {
+		if (listen(sock, 10) == SOCKET_ERROR) {
+			printf("Error: Listen function failed\n");
+			WSACleanup();
+			return 1;
+		}
+
         addr_len = sizeof(client_addr);
         msg_sock = accept(sock, (struct sockaddr*)&client_addr, &addr_len);
 
@@ -181,11 +185,15 @@ listen_goto:
 			);
 		}
 
-		uint8_t image[3*3*3] = {0};
-		memset(image, 127, sizeof(image));
+		image = CaptureScreenBuffer(0, 0, 100, 100);
+		if (image == NULL) {
+			printf("Error: Capture screen buffer failed\n");
+    		WSACleanup();
+			return 1;
+		}
 		size_t image_size = 0;
-		uint8_t * binary_image = (uint8_t *) tdefl_write_image_to_png_file_in_memory_ex(image, 3, 3, 3, &image_size, MZ_NO_COMPRESSION, 0);
-		if (binary_image == NULL) {
+		png_image = (uint8_t *) tdefl_write_image_to_png_file_in_memory_ex(image, 100, 100, 3, &image_size, MZ_NO_COMPRESSION, 0);
+		if (png_image == NULL) {
 			printf("Error: miniz png creation failed\n");
     		WSACleanup();
 			return 1;
@@ -193,7 +201,7 @@ listen_goto:
 		print_timestamp(1, 1);
 		printf("Info: Server created image of %zd bytes\n", image_size);
 
-		int buffer_size = snprintf(
+		buffer_size = snprintf(
 			buffer,
 			sizeof(buffer) - 1,
 			"HTTP/1.1 200 OK\r\n"
@@ -217,13 +225,13 @@ listen_goto:
 		}
 
 		for (i = buffer_size; i < buffer_size + image_size && i < sizeof(buffer); i++) {
-			buffer[i] = binary_image[i - buffer_size];
+			buffer[i] = png_image[i - buffer_size];
 		}
 		if (i < sizeof(buffer)) {
 			buffer[i] = '\0';
 		}
 
-		mz_free(binary_image);
+		mz_free(png_image);
 
 		send(
 			msg_sock,
@@ -233,8 +241,6 @@ listen_goto:
 		);
 
         closesocket(msg_sock);
-
-        goto listen_goto;
     }
 
     WSACleanup();
